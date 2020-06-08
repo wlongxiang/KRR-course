@@ -1,7 +1,12 @@
 ###
 ### Propagation function to be used in the recursive sudoku solver
 ###
+import time
 from itertools import chain
+
+import clingo
+from pysat.formula import CNF
+from pysat.solvers import MinisatGH
 
 
 def deep_copy(sudoku_possible_values):
@@ -90,22 +95,185 @@ def propagate(sudoku_possible_values, k):
 ###
 ### Solver that uses SAT encoding
 ###
+
+# some uti functions first
+def var_number(i, j, d, k):
+    """
+    Convert possible values into propositional vars
+
+    :param i: row number 1 - 9
+    :param j: col number 1 - 9
+    :param d: digit 1 - 9
+    :param k: size of suduko
+    :return: variable number 1- 729
+    """
+    return (k ** 2 * k ** 2) * (i - 1) + (k ** 2) * (j - 1) + d
+
+
+def extract_digit_from_solution(i, j, solution, k):
+    # return the digit of cell i, j according to the solution
+    for d in range(1, k ** 2 + 1):
+        if var_number(i, j, d, k) in solution:
+            return d
+
+
+def create_clauses(sudoku, k):
+    clauses = []
+    for i in range(1, k ** 2 + 1):
+        for j in range(1, k ** 2 + 1):
+            # 1. make sure all cells have at least one one digit
+            clauses.append([var_number(i, j, d, k) for d in range(1, k ** 2 + 1)])
+            # 2. make sure all cells have only one digit
+            for d in range(1, k ** 2 + 1):
+                for d2 in range(d + 1, k ** 2 + 1):
+                    clauses.append([-var_number(i, j, d, k), -var_number(i, j, d2, k)])
+
+    def add_distinct_clauses(cells):
+        """
+        Given a list of positions, such as indices for first row, [(1,1), (1,2)... (1,9)]
+        we create clauses that make sure each digit is distinct
+        """
+        for i in range(len(cells)):
+            for j in range(i + 1, len(cells)):
+                for d in range(1, k ** 2 + 1):
+                    clauses.append([-var_number(cells[i][0], cells[i][1], d, k),
+                                    -var_number(cells[j][0], cells[j][1], d, k)])
+
+    # make sure each row has distinct value
+    for i in range(1, k ** 2 + 1):
+        rowwise_cells = [(i, j) for j in range(1, k ** 2 + 1)]
+        add_distinct_clauses(rowwise_cells)
+    # make sure each col has distinct value
+    for j in range(1, k ** 2 + 1):
+        colwise_cells = [(i, j) for i in range(1, k ** 2 + 1)]
+        add_distinct_clauses(colwise_cells)
+    # make sure each block has distinct value
+    for i in [1 + n * k for n in range(k - 1)]:  # 1,4,7 when k=3; 1 ,5, 9, 13 when k=4
+        for j in [1 + n * k for n in range(k - 1)]:
+            add_distinct_clauses([(i + m % k, j + m // k) for m in range(k ** 2)])
+    # make sure the prefilled values are honored by a unit clause
+    for i in range(1, k ** 2 + 1):
+        for j in range(1, k ** 2 + 1):
+            d = sudoku[i - 1][j - 1]
+            if d > 0:
+                clauses.append([var_number(i, j, d, k)])
+    return clauses
+
+
 def solve_sudoku_SAT(sudoku, k):
-    return None
+    #############
+    # this solution is adjusted from https://github.com/taufanardi/sudoku-sat-solver/blob/master/Sudoku.py
+    # what I have done differently:
+    # 1. Adjusted so that it can generate to k-sized problem, not just hardcoded k=3 in the original post
+    # 2. Refactored the code to make it more readable and splitted into smaller functions instead of chunk of code
+    # 3. Rewrited the `add_distinct_clauses` code to make it more robust and easy to understand
+    #############
+    # make clauses
+    clauses = create_clauses(sudoku, k)
+    # append clauses to formula
+    formula = CNF()
+    for c in clauses:
+        formula.append(c)
+    # solve the SAT problem
+    solver = MinisatGH()
+    solver.append_formula(formula)
+    answer = solver.solve()
+    if not answer:
+        raise Exception("no solution is found")
+    # get the solution
+    solution = solver.get_model()
+    # reformat the solution into a suduko representation
+    for i in range(1, k ** 2 + 1):
+        for j in range(1, k ** 2 + 1):
+            sudoku[i - 1][j - 1] = extract_digit_from_solution(i, j, solution, k)
+    return sudoku
 
 
 ###
 ### Solver that uses CSP encoding
 ###
+from ortools.sat.python import cp_model
+
+
 def solve_sudoku_CSP(sudoku, k):
-    return None
+    ###########################
+    # this solution only references the or-tool documentation and the provided example
+    # it follows the same structure of the SAT solver, which is inspired by a existing solution as shown above
+    model = cp_model.CpModel()
+    # create variables with domain contrstrain, x1_1... x9_9 all in (1 to 9)
+    vars = dict()
+    for i in range(1, k ** 2 + 1):
+        for j in range(1, k ** 2 + 1):
+            vars[(i, j)] = model.NewIntVar(1, k ** 2, "x{}_{}".format(i, j))
+
+    # make sure all row values are distinct
+    def add_distinct_constrain(cells):
+        """
+        Given a list of positions, such as indices for first row, [(1,1), (1,2)... (1,9)]
+        we create clauses that make sure each digit is distinct
+        """
+        all_vars = [vars[i] for i in cells]
+        model.AddAllDifferent(all_vars)
+
+    # make sure each row has distinct value
+    for i in range(1, k ** 2 + 1):
+        rowwise_cells = [(i, j) for j in range(1, k ** 2 + 1)]
+        add_distinct_constrain(rowwise_cells)
+    # make sure each col has distinct value
+    for j in range(1, k ** 2 + 1):
+        colwise_cells = [(i, j) for i in range(1, k ** 2 + 1)]
+        add_distinct_constrain(colwise_cells)
+    # make sure each block has distinct value
+    for i in [1 + n * k for n in range(k - 1)]:  # 1,4,7 when k=3; 1 ,5, 9, 13 when k=4
+        for j in [1 + n * k for n in range(k - 1)]:
+            add_distinct_constrain([(i + m % k, j + m // k) for m in range(k ** 2)])
+    # make sure the prefilled values are honored by a unit clause
+    for i in range(1, k ** 2 + 1):
+        for j in range(1, k ** 2 + 1):
+            d = sudoku[i - 1][j - 1]
+            if d > 0:
+                model.Add(vars[(i, j)] == d)
+    solver = cp_model.CpSolver()
+    answer = solver.Solve(model)
+    if answer == cp_model.FEASIBLE:
+        for (i, j), var in vars.items():
+            sudoku[i-1][j-1] = solver.Value(var)
+        return sudoku
+    else:
+        return None
 
 
 ###
 ### Solver that uses ASP encoding
 ###
 def solve_sudoku_ASP(sudoku, k):
-    return None
+    asp_code = """
+    x(1..9).
+    y(1..9).
+    n(1..9).
+    
+    {sudoku(X,Y,N): n(N)}=1 :- x(X) ,y(Y).
+    
+    subgrid(X,Y,A,B) :- x(X), x(A), y(Y), y(B),(X-1)/3 == (A-1)/3, (Y-1)/3 == (B-1)/3.
+    
+    :- sudoku(X,Y,N), sudoku(A,Y,N), X!=A.
+    :- sudoku(X,Y,N), sudoku(X,B,N), Y!=B.
+    :- sudoku(X,Y,V), sudoku(A,B,V), subgrid(X,Y,A,B), X != A, Y != B.
+    
+    #show sudoku/3.
+    """
+    control = clingo.Control()
+    control.add("base", [], asp_code)
+    control.ground([("base", [])])
+
+    def on_model(model):
+        print(model.symbols(shown=True))
+
+    control.configuration.solve.models = 0
+    answer = control.solve(on_model=on_model)
+
+    if answer.satisfiable == True:
+        print("The graph is 3-colorable")
 
 
 ###
