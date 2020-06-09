@@ -247,33 +247,49 @@ def solve_sudoku_CSP(sudoku, k):
 ### Solver that uses ASP encoding
 ###
 def solve_sudoku_ASP(sudoku, k):
-    asp_code = """
-    x(1..9).
-    y(1..9).
-    n(1..9).
+    ##############
+    # The solution is inspired by this blog:
+    # https://ddmler.github.io/asp/2018/07/10/answer-set-programming-sudoku-solver.html
+    # what I changed:
+    # 1. Generated the solution from k=3 to any k
+    # 2. Add the prefilled contrains
+    # 3. Rewroten the callback function to return the final sudoku in expected format
+    ###############
+    asp_code = f"""
+    x(1..{k ** 2}).
+    y(1..{k ** 2}).
+    n(1..{k ** 2}).
     
-    {sudoku(X,Y,N): n(N)}=1 :- x(X) ,y(Y).
+    {{sudoku(X,Y,N): n(N)}}=1 :- x(X) ,y(Y).
     
-    subgrid(X,Y,A,B) :- x(X), x(A), y(Y), y(B),(X-1)/3 == (A-1)/3, (Y-1)/3 == (B-1)/3.
+    subgrid(X,Y,A,B) :- x(X), x(A), y(Y), y(B),(X-1)/{k} == (A-1)/{k}, (Y-1)/{k} == (B-1)/{k}.
     
     :- sudoku(X,Y,N), sudoku(A,Y,N), X!=A.
     :- sudoku(X,Y,N), sudoku(X,B,N), Y!=B.
     :- sudoku(X,Y,V), sudoku(A,B,V), subgrid(X,Y,A,B), X != A, Y != B.
-    
-    #show sudoku/3.
     """
+    # Make prefilled values constrains
+    for i in range(k ** 2):
+        for j in range(k ** 2):
+            if sudoku[i][j] != 0:
+                v = int(sudoku[i][j])
+                # setting the lower bound of prefilled variable to 1, meaning "true" or already assigned.
+                asp_code += f"sudoku({i + 1},{j + 1},{v}). "
     control = clingo.Control()
     control.add("base", [], asp_code)
     control.ground([("base", [])])
 
     def on_model(model):
-        print(model.symbols(shown=True))
+        for x in model.symbols(shown=True):
+            if x.name == "sudoku":
+                sudoku[x.arguments[0].number - 1][x.arguments[1].number - 1] = x.arguments[2].number
 
     control.configuration.solve.models = 0
     answer = control.solve(on_model=on_model)
-
     if answer.satisfiable == True:
-        print("The graph is 3-colorable")
+        return sudoku
+    else:
+        return None
 
 
 ###
