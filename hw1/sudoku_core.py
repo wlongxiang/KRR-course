@@ -179,7 +179,7 @@ def solve_sudoku_SAT(sudoku, k):
     solver.append_formula(formula)
     answer = solver.solve()
     if not answer:
-        raise Exception("no solution is found")
+        return None
     # get the solution
     solution = solver.get_model()
     # reformat the solution into a suduko representation
@@ -279,9 +279,6 @@ def solve_sudoku_ASP(sudoku, k):
 ###
 ### Solver that uses ILP encoding
 ###
-
-import sys
-import math
 import gurobipy as gp
 from gurobipy import GRB
 
@@ -289,69 +286,54 @@ from gurobipy import GRB
 def solve_sudoku_ILP(sudoku, k):
     ################
     # adjusted from this solution: https://www.gurobi.com/documentation/9.0/examples/sudoku_py.html
+    # changes I made:
+    # 1. Rewritten the constrains to a easy to understand loop, orginally it is a more concise generator form
+    # 2. Broke the python generator comprehension syntax for explit loops to make it clearer
+    # 3. Added code to reconstruct the sudoku solution to the expected list of list form
+    # 4. Expanded solution to use k
+    # 5. added extra comments to make the solution clean
     ################
-    n = len(sudoku[0])
-    s = int(math.sqrt(n))
-
-    # Create our 3-D array of model variables
-
+    # each var represents a bool var indicating if at (i, j ) a digit is true
     model = gp.Model('sudoku')
-
-    vars = model.addVars(n, n, n, vtype=GRB.BINARY, name='G')
-
-    # Fix variables associated with cells whose values are pre-specified
-
-    for i in range(n):
-        for j in range(n):
+    vars = model.addVars(k ** 2, k ** 2, k ** 2, vtype=GRB.BINARY, name='G')
+    # Each cell must take only one value
+    for i in range(k ** 2):
+        for j in range(k ** 2):
+            model.addConstr(vars.sum(i, j, '*') == 1, name="CELL")
+    # Each value appears once per row
+    for i in range(k ** 2):
+        for v in range(k ** 2):
+            model.addConstr(vars.sum(i, '*', v) == 1, name='ROWWISE')
+    # Each value appears once per column
+    for j in range(k ** 2):
+        for v in range(k ** 2):
+            model.addConstr(vars.sum('*', j, v) == 1, name="COLWISE")
+    # Each value appears once per block
+    for v in range(k ** 2):
+        for i0 in range(k):
+            for j0 in range(k):
+                # make the sum constrain for each block
+                sum_list = []
+                for i in range(i0 * k, (i0 + 1) * k):
+                    for j in range(j0 * k, (j0 + 1) * k):
+                        sum_list.append(vars[i, j, v])
+                model.addConstr(gp.quicksum(sum_list) == 1, name="BLOCK")
+    # Make prefilled values constrains
+    for i in range(k ** 2):
+        for j in range(k ** 2):
             if sudoku[i][j] != 0:
                 v = int(sudoku[i][j]) - 1
+                # setting the lower bound of prefilled variable to 1, meaning "true" or already assigned.
                 vars[i, j, v].LB = 1
-
-    # Each cell must take one value
-
-    model.addConstrs((vars.sum(i, j, '*') == 1
-                      for i in range(n)
-                      for j in range(n)), name='V')
-
-    # Each value appears once per row
-
-    model.addConstrs((vars.sum(i, '*', v) == 1
-                      for i in range(n)
-                      for v in range(n)), name='R')
-
-    # Each value appears once per column
-
-    model.addConstrs((vars.sum('*', j, v) == 1
-                      for j in range(n)
-                      for v in range(n)), name='C')
-
-    # Each value appears once per subsudoku
-
-    model.addConstrs((
-        gp.quicksum(vars[i, j, v] for i in range(i0 * s, (i0 + 1) * s)
-                    for j in range(j0 * s, (j0 + 1) * s)) == 1
-        for v in range(n)
-        for i0 in range(s)
-        for j0 in range(s)), name='Sub')
-
     model.optimize()
-
-    model.write('sudoku.lp')
-
-    print('')
-    print('Solution:')
-    print('')
-
-    # Retrieve optimization result
-
+    # the model results are stored in the X attribute in gurobi
     solution = model.getAttr('X', vars)
     res_final = []
-    for i in range(n):
+    for i in range(k ** 2):
         sol = []
-        for j in range(n):
-            for v in range(n):
+        for j in range(k ** 2):
+            for v in range(k ** 2):
                 if solution[i, j, v] > 0.5:
                     sol.append(int(v + 1))
-        print(sol)
         res_final.append(sol)
     return res_final
