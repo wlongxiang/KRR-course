@@ -14,6 +14,9 @@ def add_actions(planning_problem, asp_code):
     for action in planning_problem.actions:
         # action(rightshoe).
         action_name = action.name.swapcase()
+        if action.args:
+            args_str = str(action.args)
+            action_name += args_str.swapcase()
         # swapcase because in clingo ASP, lowercase letters represent literals, uppercase represents variables
         asp_code += "action(" + action_name + ").\n"
         # precond(rightshoe, rightsockon).
@@ -25,7 +28,7 @@ def add_actions(planning_problem, asp_code):
             effect_str = str(effect).swapcase()
             if "~" in effect_str:
                 effect_str = effect_str.replace("~", "")
-                asp_code += "not effect(" + action_name + "," + effect_str + ").\n"
+                asp_code += "negeffect(" + action_name + "," + effect_str + ").\n"
 
             else:
                 asp_code += "effect(" + action_name + "," + effect_str + ").\n"
@@ -87,7 +90,7 @@ holds(P,0) :- init(P).
 :- takeactionAtTime(A,T), precond(A,G), not holds(G, T-1).
 holds(G,T) :- holds(G,T-1), not ocdel(G,T), time(T).
 holds(G,T) :- takeactionAtTime(A,T), effect(A,G).
-ocdel(G,T) :- takeactionAtTime(A,T), effect(A,G).
+ocdel(G,T) :- takeactionAtTime(A,T), negeffect(A,G).
 :- goal(G), not holds(G, t).
 #show takeactionAtTime/2.
     """
