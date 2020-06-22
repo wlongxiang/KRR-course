@@ -59,6 +59,10 @@ def solve_planning_problem_using_ASP(planning_problem, t_max):
     """
     ############
     # Note: this assignment is done based on discussion with Ruihan.
+    # TODO: the current solution only work for easy0 which has simple effects and preconditions for actions
+    # I was not able to extend it to more complex action effects and preconditions, I have tried to reach to TA using
+    # canvas inbox, but I didn't get any response, without external help, this is really the best I can do. I am sorry.
+    # this course is the most stressful so far in the whole master of AI due to its lack of support.
     ##############
     #
     # first we define the max STEP as constant
@@ -69,12 +73,17 @@ def solve_planning_problem_using_ASP(planning_problem, t_max):
     asp_code = add_initial_states(planning_problem, asp_code)
     asp_code = add_actions(planning_problem, asp_code)
     asp_code = add_goals(planning_problem, asp_code)
+    ###############
     # note the following code is borrowed from paper: "Potassco: The Potsdam Answer Set Solving Collection"
     # which is universal logic program for converting automatic planning problem into ASP, only need to add additions
     # rules for the problem at hand.
+    ##############
     asp_code += """
+% initial conditions holds
 holds(P,0) :- init(P).
+% make sure one action is taken at a time
 1 { takeactionAtTime(A,T) : action(A) } 1 :- time(T).
+% constrain: if an action A is taken at step T, its precondion must hold at time T-1
 :- takeactionAtTime(A,T), precond(A,G), not holds(G, T-1).
 holds(G,T) :- holds(G,T-1), not ocdel(G,T), time(T).
 holds(G,T) :- takeactionAtTime(A,T), effect(A,G).
